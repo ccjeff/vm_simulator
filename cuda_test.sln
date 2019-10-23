@@ -5,6 +5,11 @@ VisualStudioVersion = 15.0.27703.2000
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "cuda_test", "cuda_test\cuda_test.vcxproj", "{9A0237ED-4D76-4BD1-A8B0-CA93C81A50C7}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{014F1AD3-F505-4BF1-B23B-68D2F335403B}"
+	ProjectSection(SolutionItems) = preProject
+		cuda_test\test.bin = cuda_test\test.bin
+	EndProjectSection
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64

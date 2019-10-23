@@ -6,7 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define DATAFILE "./data.bin"
+#define DATAFILE "./test.bin"
 #define OUTFILE "./snapshot.bin"
 
 // page size is 32bytes

@@ -19,7 +19,6 @@ struct VirtualMemory {
   int PHYSICAL_MEM_SIZE;
   int STORAGE_SIZE;
   int PAGE_ENTRIES;
-  int USED_ENTRIES;
 };
 
 // TODO

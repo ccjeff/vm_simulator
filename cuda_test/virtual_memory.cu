@@ -15,22 +15,28 @@ __device__ int vm_swap(int phyPage, int virtPage, VirtualMemory* vm) {
 }
 
 __device__ u32 leastUsed(VirtualMemory* vm) {
-	int tempSmallest = 0;
-	int tempAddr;
+	int tempSmallest = vm->invert_page_table[vm->PAGE_ENTRIES];
+	int tempAddr = 0;
 	for (int i = 0; i < vm->PAGE_ENTRIES; i++) {
 		if (vm->invert_page_table[i + vm->PAGE_ENTRIES] < tempSmallest) {
 			tempSmallest = vm->invert_page_table[i + vm->PAGE_ENTRIES];
 			tempAddr = i;
 		}
 	}
+	
+	//vm->invert_page_table[tempAddr + vm->PAGE_ENTRIES] += 1024;
+	//printf("least1 should be: %d\n", vm->invert_page_table[1024]);
+	vm->invert_page_table[tempAddr + vm->PAGE_ENTRIES] = tempSmallest + vm->PAGE_ENTRIES;
+	//printf("least used index is: %d\n", tempAddr);
 	return (u32) tempAddr;
 }
 
 
 __device__ int getPhyAddr(int addr, VirtualMemory* vm) {
-	int physicalPage;
-	for (int i = 0; i < vm->INVERT_PAGE_TABLE_SIZE; i++) {
-		if ((vm->invert_page_table[i] & 0x0000FFFF) == (addr & 0x0000FFFF)) {
+	int physicalPage = 0;
+	int virtualPage = addr / vm->PAGESIZE;
+	for (int i = 0; i < vm->PAGE_ENTRIES; i++) {
+		if ((vm->invert_page_table[i]) == (virtualPage)) { // todo: 这个地方应该是addr/page? 1024个page entry怎么存？这样判断virtual addr 肯定不对应
 			physicalPage = (u32)i;
 			return physicalPage;
 		}
@@ -75,10 +81,9 @@ __device__ void vm_init(VirtualMemory *vm, uchar *buffer, uchar *storage,
 
 __device__ uchar vm_read(VirtualMemory *vm, u32 addr) {
 	/* Complate vm_read function to read single element from data buffer */
-	printf("inside read\n");
 	//todo 
 	uchar toReturn;
-	int pageIdx = addr / vm->PAGESIZE;
+	int pageIdx = addr / vm->PAGESIZE;  // virtualPage index
 	int offsetIdx = addr % vm->PAGESIZE;
 
 	int memAddr = getPhyAddr(addr, vm);
@@ -88,45 +93,46 @@ __device__ uchar vm_read(VirtualMemory *vm, u32 addr) {
 		vm_swap(leastIdx,pageIdx,vm);
 		memAddr = leastIdx;
 	}
-
+	printf("inside read, char get is %c\n", vm->buffer[memAddr*vm->PAGESIZE + offsetIdx]);
 	return vm->buffer[memAddr*vm->PAGESIZE+offsetIdx];
 }
 
 __device__ void vm_write(VirtualMemory *vm, u32 addr, uchar value) {
 	/* Complete vm_write function to write value into data buffer */
-	int pageIdx;
-	int offsetIdx;
+	int pageIdx = addr/vm->PAGESIZE;
+	int offsetIdx = addr%vm->PAGESIZE;
 	int physicalPage = 0xFFFFFFFF;
-	int used_space = 0;
-	offsetIdx = addr % vm->PAGESIZE;
-	/*check if an array is full, then the resizing is necessary*/
 	
 	physicalPage = getPhyAddr(addr,vm);
+	// unsuccessful get will return 0xFFFFFFFF, which means needs swapping (or needs to be initialized).
+	printf("getPhyAddr success , addr is: %d \n",addr);
 
 	// if the page has been found in the pagetable
+	printf("the physicalPage is: %d \n",physicalPage);
 	if (physicalPage != 0xFFFFFFFF) {
+		printf("found\n");
 		int phyAddr = physicalPage * vm->PAGESIZE + offsetIdx;
 		vm->buffer[phyAddr] = value;
-		used_space++;
-		vm->invert_page_table[physicalPage + vm->PAGE_ENTRIES]++;
+		vm->invert_page_table[physicalPage + vm->PAGE_ENTRIES]+=vm->PAGE_ENTRIES;
+		printf("normal write done \n");
 	}
 	else {
-		// if the pagetable is already full by now
-		if (used_space == vm->PAGE_ENTRIES) {
-			// do swap before write
-			int leastIdx = leastUsed(vm);
-			vm_swap(leastIdx, pageIdx,vm);
+		// do swap before write
+		int leastIdx = leastUsed(vm);
+		if (vm->invert_page_table[leastIdx] == 0x80000000) {
 			vm->buffer[leastIdx] = value;
-			used_space -= vm->PAGESIZE;
+			printf("value1 is: %c\n",value);
+			vm->invert_page_table[leastIdx] = addr;
 		}
 		else {
-			// the pagetable is not full, and the addr is not found in the pagetable,
-			// happens during initialization and after swap
-			
-
+			printf("the least index for swapping is: %d\n",leastIdx);
+			printf("swap\n");
+			vm_swap(leastIdx, pageIdx, vm);
+			vm->buffer[leastIdx] = value;
+			printf("value2 is: %c\n", value);
+			vm->invert_page_table[leastIdx] = addr;
 		}
 	}
-
 }
 
 __device__ void vm_snapshot(VirtualMemory *vm, uchar *results, int offset,
