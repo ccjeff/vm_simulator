@@ -9,6 +9,7 @@ __device__ int vm_swap(int phyPage, int virtPage, VirtualMemory* vm) {
 	for (int i = 0; i < vm->PAGESIZE; i++) {
 		uchar tempBuffer;
 		tempBuffer = vm->storage[virtPage*vm->PAGESIZE + i];
+		vm->storage[virtPage*vm->PAGESIZE + i] = vm->buffer[phyPage*vm->PAGESIZE + i];
 		vm->buffer[phyPage*vm->PAGESIZE + i] = tempBuffer;
 	}
 	return 0;
@@ -36,7 +37,7 @@ __device__ int getPhyAddr(int addr, VirtualMemory* vm) {
 	int physicalPage = 0;
 	int virtualPage = addr / vm->PAGESIZE;
 	for (int i = 0; i < vm->PAGE_ENTRIES; i++) {
-		if ((vm->invert_page_table[i]) == (virtualPage)) { // todo: 这个地方应该是addr/page? 1024个page entry怎么存？这样判断virtual addr 肯定不对应
+		if ((vm->invert_page_table[i]) == (virtualPage)) { 
 			physicalPage = (u32)i;
 			return physicalPage;
 		}
@@ -84,53 +85,62 @@ __device__ uchar vm_read(VirtualMemory *vm, u32 addr) {
 	//todo 
 	uchar toReturn;
 	int pageIdx = addr / vm->PAGESIZE;  // virtualPage index
-	int offsetIdx = addr % vm->PAGESIZE;
+	int offsetIdx = addr % vm->PAGESIZE; // virtualPage offset
 
-	int memAddr = getPhyAddr(addr, vm);
+	int memAddr = 0xFFFFFFFF;
+	memAddr = getPhyAddr(addr, vm);
+
 	if (memAddr == 0xFFFFFFFF) {
 		// do swap
-		u32 leastIdx = leastUsed(vm);
+		int leastIdx = leastUsed(vm);
 		vm_swap(leastIdx,pageIdx,vm);
+		vm->invert_page_table[leastIdx] = pageIdx;
+		// change pagetable content
 		memAddr = leastIdx;
 	}
-	printf("inside read, char get is %c\n", vm->buffer[memAddr*vm->PAGESIZE + offsetIdx]);
+	//printf("%c",vm->buffer[memAddr*vm->PAGESIZE + offsetIdx]);
 	return vm->buffer[memAddr*vm->PAGESIZE+offsetIdx];
 }
 
 __device__ void vm_write(VirtualMemory *vm, u32 addr, uchar value) {
 	/* Complete vm_write function to write value into data buffer */
-	int pageIdx = addr/vm->PAGESIZE;
-	int offsetIdx = addr%vm->PAGESIZE;
+	int pageIdx = addr / vm->PAGESIZE;
+	int offsetIdx = addr % vm->PAGESIZE;
 	int physicalPage = 0xFFFFFFFF;
 	
 	physicalPage = getPhyAddr(addr,vm);
 	// unsuccessful get will return 0xFFFFFFFF, which means needs swapping (or needs to be initialized).
-	printf("getPhyAddr success , addr is: %d \n",addr);
-
+	printf("the phyAddr is: %d \n",physicalPage);
 	// if the page has been found in the pagetable
-	printf("the physicalPage is: %d \n",physicalPage);
 	if (physicalPage != 0xFFFFFFFF) {
-		printf("found\n");
+		//printf("found\n");
 		int phyAddr = physicalPage * vm->PAGESIZE + offsetIdx;
-		vm->buffer[phyAddr] = value;
-		vm->invert_page_table[physicalPage + vm->PAGE_ENTRIES]+=vm->PAGE_ENTRIES;
-		printf("normal write done \n");
+		vm->buffer[phyAddr] = value; /// write the value into the physical memory
+		vm->invert_page_table[physicalPage + vm->PAGE_ENTRIES] += vm->PAGE_ENTRIES;
+		// change LRU settings : since in this case the physical addr has been accessed
+		//printf("normal write done \n");
 	}
 	else {
-		// do swap before write
-		int leastIdx = leastUsed(vm);
+		// not found in pagetable, do swap before write
+		int leastIdx = leastUsed(vm); // get the least used index (the smallest number)
+		// since this is the initializing stage, should return 0-1023 respectively
 		if (vm->invert_page_table[leastIdx] == 0x80000000) {
+			// initializing stage, where every write will contribute 1 page fault number without swapping
+			(*vm->pagefault_num_ptr)++;
 			vm->buffer[leastIdx] = value;
-			printf("value1 is: %c\n",value);
-			vm->invert_page_table[leastIdx] = addr;
+			//printf("value1 is: %c\n",value);
+			vm->invert_page_table[leastIdx] = pageIdx;
 		}
 		else {
-			printf("the least index for swapping is: %d\n",leastIdx);
-			printf("swap\n");
+			// perform swapping with the storage.
+			//printf("the least index for swapping is: %d\n",leastIdx);
+			//printf("swap\n");
 			vm_swap(leastIdx, pageIdx, vm);
+			//perform normal write value after swap
 			vm->buffer[leastIdx] = value;
-			printf("value2 is: %c\n", value);
-			vm->invert_page_table[leastIdx] = addr;
+			//printf("value2 is: %c\n", value);
+			vm->invert_page_table[leastIdx] = pageIdx;
+			// swap has changed the content, now change the pagetable contents
 		}
 	}
 }
@@ -139,9 +149,11 @@ __device__ void vm_snapshot(VirtualMemory *vm, uchar *results, int offset,
                             int input_size) {
 	/* Complete snapshot function togther with vm_read to load elements from data
 	* to result buffer */
-	printf("inside snapshot");
-	for (int i = 0; i < vm->STORAGE_SIZE; i++) {
-		results[offset + i] = vm_read(vm, ((u32)i));
+	printf("inside snapshot\n");
+	for (int i = 0; i < input_size; i++) {
+		int a = vm_read(vm, i);
+		printf("a is: %c", a);
+		results[offset + i] = a;
 	}
 }
 

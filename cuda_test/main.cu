@@ -111,7 +111,7 @@ int main() {
 
 	cudaDeviceSynchronize();
 	cudaDeviceReset();
-
+	
 	write_binaryFile(OUTFILE, results, input_size);
 
 	printf("pagefault number is %d\n", pagefault_num);
