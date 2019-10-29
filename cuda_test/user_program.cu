@@ -17,19 +17,19 @@ __device__ void user_program(VirtualMemory *vm, uchar *input, uchar *results,
 	}
 	*/
 	printf("break2\n");
-	
+	/*
 	for (int i = 0; i < input_size; i++) {
 		uchar a = vm_read(vm, i);
 		//printf("the value from vm_read is: %c \n", a);
 	}
+	*/
 	
-	/*
 	for (int i = input_size - 1; i >= input_size - 32769; i--) {
 		//printf("vm read addr is: %d",i);
 		int value = vm_read(vm, i);
-		printf("value is : %d",value);
+		//printf("value is : %d",value);
 	}
-	*/
+	
 	printf("break3\n");
 
 	vm_snapshot(vm, results, 0, input_size);

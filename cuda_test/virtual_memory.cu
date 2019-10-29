@@ -40,7 +40,7 @@ __device__ u32 leastUsed(VirtualMemory* vm) {
 __device__ void changeLRU(VirtualMemory* vm, int LRUidx) {
 	for (int i = 0; i < vm->PAGE_ENTRIES; i++) {
 		int rank = vm->invert_page_table[i + vm->PAGE_ENTRIES];
-		if (vm->invert_page_table[LRUidx] < rank) {
+		if (vm->invert_page_table[LRUidx+vm->PAGE_ENTRIES] < rank) {
 			vm->invert_page_table[i+vm->PAGE_ENTRIES]--;
 		}
 	}
@@ -103,16 +103,19 @@ __device__ uchar vm_read(VirtualMemory *vm, u32 addr) {
 
 	int memAddr = 0xFFFFFFFF;
 	memAddr = getPhyAddr(addr, vm);
+	if (memAddr != 0xFFFFFFFF) {
+		changeLRU(vm, memAddr);
+	}
 
-	if (memAddr == 0xFFFFFFFF) {
+	else {
 		// do swap
 		int leastIdx = leastUsed(vm);
 		vm_swap(leastIdx,pageIdx,vm);
+		changeLRU(vm, leastIdx);
 		vm->invert_page_table[leastIdx] = pageIdx;
 		// change pagetable content
 		memAddr = leastIdx;
 	}
-	changeLRU(vm, memAddr);
 	//printf("%c",vm->buffer[memAddr*vm->PAGESIZE + offsetIdx]);
 	return vm->buffer[memAddr*vm->PAGESIZE+offsetIdx];
 }

@@ -18,6 +18,8 @@
 // 128 KB in global memory
 #define STORAGE_SIZE (1 << 17)
 
+#define NUM_THREADS (1<<2)
+
 /*managed: memory space specifier*/
 
 //// count the pagefault times
