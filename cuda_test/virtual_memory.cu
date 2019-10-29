@@ -5,12 +5,17 @@
 #include <stdlib.h> 
 
 __device__ int vm_swap(int phyPage, int virtPage, VirtualMemory* vm) {
+	// phyPage: the least recent used page's idx
+	// virtPage: the virtualPage idx
+	int leastVirtPage;
+	leastVirtPage = vm->invert_page_table[phyPage];
 	(*vm->pagefault_num_ptr)++;
 	for (int i = 0; i < vm->PAGESIZE; i++) {
 		uchar tempBuffer;
-		tempBuffer = vm->storage[virtPage*vm->PAGESIZE + i];
-		vm->storage[virtPage*vm->PAGESIZE + i] = vm->buffer[phyPage*vm->PAGESIZE + i];
-		vm->buffer[phyPage*vm->PAGESIZE + i] = tempBuffer;
+		//tempBuffer = vm->storage[virtPage*vm->PAGESIZE + i];
+		vm->storage[leastVirtPage*vm->PAGESIZE + i] = vm->buffer[phyPage*vm->PAGESIZE + i];
+		// the swap in process
+		vm->buffer[phyPage*vm->PAGESIZE + i] = vm->storage[virtPage*vm->PAGESIZE + i];
 	}
 	return 0;
 }
@@ -27,11 +32,20 @@ __device__ u32 leastUsed(VirtualMemory* vm) {
 	
 	//vm->invert_page_table[tempAddr + vm->PAGE_ENTRIES] += 1024;
 	//printf("least1 should be: %d\n", vm->invert_page_table[1024]);
-	vm->invert_page_table[tempAddr + vm->PAGE_ENTRIES] = tempSmallest + vm->PAGE_ENTRIES;
+	//vm->invert_page_table[tempAddr + vm->PAGE_ENTRIES] = tempSmallest + vm->PAGE_ENTRIES;
 	//printf("least used index is: %d\n", tempAddr);
 	return (u32) tempAddr;
 }
 
+__device__ void changeLRU(VirtualMemory* vm, int LRUidx) {
+	for (int i = 0; i < vm->PAGE_ENTRIES; i++) {
+		int rank = vm->invert_page_table[i + vm->PAGE_ENTRIES];
+		if (vm->invert_page_table[LRUidx] < rank) {
+			vm->invert_page_table[i+vm->PAGE_ENTRIES]--;
+		}
+	}
+	vm->invert_page_table[LRUidx+vm->PAGE_ENTRIES] = vm->PAGE_ENTRIES - 1;
+}
 
 __device__ int getPhyAddr(int addr, VirtualMemory* vm) {
 	int physicalPage = 0;
@@ -98,6 +112,7 @@ __device__ uchar vm_read(VirtualMemory *vm, u32 addr) {
 		// change pagetable content
 		memAddr = leastIdx;
 	}
+	changeLRU(vm, memAddr);
 	//printf("%c",vm->buffer[memAddr*vm->PAGESIZE + offsetIdx]);
 	return vm->buffer[memAddr*vm->PAGESIZE+offsetIdx];
 }
@@ -110,13 +125,14 @@ __device__ void vm_write(VirtualMemory *vm, u32 addr, uchar value) {
 	
 	physicalPage = getPhyAddr(addr,vm);
 	// unsuccessful get will return 0xFFFFFFFF, which means needs swapping (or needs to be initialized).
-	printf("the phyAddr is: %d \n",physicalPage);
+	//printf("the phyAddr is: %d \n",physicalPage);
 	// if the page has been found in the pagetable
 	if (physicalPage != 0xFFFFFFFF) {
 		//printf("found\n");
 		int phyAddr = physicalPage * vm->PAGESIZE + offsetIdx;
 		vm->buffer[phyAddr] = value; /// write the value into the physical memory
-		vm->invert_page_table[physicalPage + vm->PAGE_ENTRIES] += vm->PAGE_ENTRIES;
+		changeLRU(vm,physicalPage);
+		//vm->invert_page_table[physicalPage + vm->PAGE_ENTRIES] += vm->PAGE_ENTRIES;
 		// change LRU settings : since in this case the physical addr has been accessed
 		//printf("normal write done \n");
 	}
@@ -127,9 +143,10 @@ __device__ void vm_write(VirtualMemory *vm, u32 addr, uchar value) {
 		if (vm->invert_page_table[leastIdx] == 0x80000000) {
 			// initializing stage, where every write will contribute 1 page fault number without swapping
 			(*vm->pagefault_num_ptr)++;
-			vm->buffer[leastIdx] = value;
+			vm->buffer[leastIdx*vm->PAGESIZE] = value;
 			//printf("value1 is: %c\n",value);
 			vm->invert_page_table[leastIdx] = pageIdx;
+			changeLRU(vm, leastIdx);
 		}
 		else {
 			// perform swapping with the storage.
@@ -137,10 +154,11 @@ __device__ void vm_write(VirtualMemory *vm, u32 addr, uchar value) {
 			//printf("swap\n");
 			vm_swap(leastIdx, pageIdx, vm);
 			//perform normal write value after swap
-			vm->buffer[leastIdx] = value;
+			vm->buffer[leastIdx*vm->PAGESIZE] = value;
 			//printf("value2 is: %c\n", value);
 			vm->invert_page_table[leastIdx] = pageIdx;
 			// swap has changed the content, now change the pagetable contents
+			changeLRU(vm, leastIdx);
 		}
 	}
 }
@@ -152,7 +170,7 @@ __device__ void vm_snapshot(VirtualMemory *vm, uchar *results, int offset,
 	printf("inside snapshot\n");
 	for (int i = 0; i < input_size; i++) {
 		int a = vm_read(vm, i);
-		printf("a is: %c", a);
+		//printf("a is: %c", a);
 		results[offset + i] = a;
 	}
 }
