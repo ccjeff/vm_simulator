@@ -1,5 +1,5 @@
 # __CSC3150 Assignment 3__
-曹正家 117010008
+Author: Cao Zhengjia 117010008
 
 ## 0. Environment and Bonus status
 Environment: 
