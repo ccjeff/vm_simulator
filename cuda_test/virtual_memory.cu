@@ -1,8 +1,52 @@
 ﻿#include "virtual_memory.h"
 #include <cuda.h>
 #include <cuda_runtime.h>
+#include <device_launch_parameters.h>
 #include <stdio.h>
 #include <stdlib.h> 
+#include <time.h>
+struct Lock
+{
+	int *mutex;
+	__device__ Lock(void)
+	{
+#if __CUDA_ARCH__ >= 200
+		mutex = new int;
+		(*mutex) = 0;
+#endif
+	}
+	__device__ ~Lock(void)
+	{
+#if __CUDA_ARCH__ >= 200
+		delete mutex;
+#endif
+	}
+
+	__device__ void lock(void)
+	{
+#if __CUDA_ARCH__ >= 200
+		while (atomicCAS(mutex, 0, 1) != 0);
+#endif
+	}
+	__device__ void unlock(void)
+	{
+#if __CUDA_ARCH__ >= 200
+		atomicExch(mutex, 0);
+#endif
+	}
+};
+
+/*
+__device__ void acquire_semaphore(volatile int *lock) {
+	while (atomicCAS((int *)lock, 0, 1) != 0);
+}
+
+__device__ void release_semaphore(volatile int *lock) {
+	*lock = 0;
+	__threadfence();
+}
+*/
+
 
 __device__ int vm_swap(int phyPage, int virtPage, VirtualMemory* vm) {
 	// phyPage: the least recent used page's idx
@@ -95,18 +139,37 @@ __device__ void vm_init(VirtualMemory *vm, uchar *buffer, uchar *storage,
 }
 
 __device__ uchar vm_read(VirtualMemory *vm, u32 addr) {
+	// trying another type of locking...
+	Lock lock;
+
+	lock.lock();
+	// 0. mutex_lock 
+	int thread_id = threadIdx.x;
+	
+	clock_t start = clock();
+	clock_t now;
+	for (;;) {
+		now = clock();
+		clock_t cycles = now > start ? now - start : now + (0xffffffff - start);
+		if (cycles >= 10000) {
+			break;
+		}
+	}
+	// Stored "now" in global memory here to prevent the
+	// compiler from optimizing away the entire loop.
+	int global_now = now;
+
 	/* Complate vm_read function to read single element from data buffer */
 	//todo 
 	uchar toReturn;
 	int pageIdx = addr / vm->PAGESIZE;  // virtualPage index
 	int offsetIdx = addr % vm->PAGESIZE; // virtualPage offset
-
 	int memAddr = 0xFFFFFFFF;
+
 	memAddr = getPhyAddr(addr, vm);
 	if (memAddr != 0xFFFFFFFF) {
 		changeLRU(vm, memAddr);
 	}
-
 	else {
 		// do swap
 		int leastIdx = leastUsed(vm);
@@ -117,15 +180,36 @@ __device__ uchar vm_read(VirtualMemory *vm, u32 addr) {
 		memAddr = leastIdx;
 	}
 	//printf("%c",vm->buffer[memAddr*vm->PAGESIZE + offsetIdx]);
+	lock.unlock();
 	return vm->buffer[memAddr*vm->PAGESIZE+offsetIdx];
 }
 
 __device__ void vm_write(VirtualMemory *vm, u32 addr, uchar value) {
 	/* Complete vm_write function to write value into data buffer */
+	Lock lock;
+	lock.lock();
+
 	int pageIdx = addr / vm->PAGESIZE;
 	int offsetIdx = addr % vm->PAGESIZE;
 	int physicalPage = 0xFFFFFFFF;
+	int thread_id = threadIdx.x;
+	//printf("current thread_id is: %d \n",threadIdx.x);
+	//printf("with current addr is: %d \n", addr);
 	
+	// 0. mutex_lock 
+	clock_t start = clock();
+	clock_t now;
+	for (;;) {
+		now = clock();
+		clock_t cycles = now > start ? now - start : now + (0xffffffff - start);
+		if (cycles >= 10000) {
+			break;
+		}
+	}
+	// Stored "now" in global memory here to prevent the
+	// compiler from optimizing away the entire loop.
+	int global_now = now;
+
 	physicalPage = getPhyAddr(addr,vm);
 	// unsuccessful get will return 0xFFFFFFFF, which means needs swapping (or needs to be initialized).
 	//printf("the phyAddr is: %d \n",physicalPage);
@@ -133,7 +217,9 @@ __device__ void vm_write(VirtualMemory *vm, u32 addr, uchar value) {
 	if (physicalPage != 0xFFFFFFFF) {
 		//printf("found\n");
 		int phyAddr = physicalPage * vm->PAGESIZE + offsetIdx;
+		//printf("phyAddr is: %d\n", phyAddr);
 		vm->buffer[phyAddr] = value; /// write the value into the physical memory
+		//printf("thread is: %d, and insertion check is: %c \n", threadIdx.x, vm->buffer[phyAddr]);
 		changeLRU(vm,physicalPage);
 		//vm->invert_page_table[physicalPage + vm->PAGE_ENTRIES] += vm->PAGE_ENTRIES;
 		// change LRU settings : since in this case the physical addr has been accessed
@@ -146,7 +232,8 @@ __device__ void vm_write(VirtualMemory *vm, u32 addr, uchar value) {
 		if (vm->invert_page_table[leastIdx] == 0x80000000) {
 			// initializing stage, where every write will contribute 1 page fault number without swapping
 			(*vm->pagefault_num_ptr)++;
-			vm->buffer[leastIdx*vm->PAGESIZE] = value;
+			vm->buffer[leastIdx*vm->PAGESIZE+thread_id] = value;
+			//printf("thread is: %d, and insertion check is: %c \n",threadIdx.x, vm->buffer[leastIdx*vm->PAGESIZE+thread_id]);
 			//printf("value1 is: %c\n",value);
 			vm->invert_page_table[leastIdx] = pageIdx;
 			changeLRU(vm, leastIdx);
@@ -157,13 +244,16 @@ __device__ void vm_write(VirtualMemory *vm, u32 addr, uchar value) {
 			//printf("swap\n");
 			vm_swap(leastIdx, pageIdx, vm);
 			//perform normal write value after swap
-			vm->buffer[leastIdx*vm->PAGESIZE] = value;
+			vm->buffer[leastIdx*vm->PAGESIZE+thread_id] = value;
+			//printf("thread is: %d, and insertion check is: %c \n",threadIdx.x, vm->buffer[leastIdx*vm->PAGESIZE+thread_id]);
 			//printf("value2 is: %c\n", value);
 			vm->invert_page_table[leastIdx] = pageIdx;
 			// swap has changed the content, now change the pagetable contents
 			changeLRU(vm, leastIdx);
 		}
 	}
+	// unlock the mutex
+	lock.unlock();
 }
 
 __device__ void vm_snapshot(VirtualMemory *vm, uchar *results, int offset,
@@ -171,10 +261,11 @@ __device__ void vm_snapshot(VirtualMemory *vm, uchar *results, int offset,
 	/* Complete snapshot function togther with vm_read to load elements from data
 	* to result buffer */
 	printf("inside snapshot\n");
-	for (int i = 0; i < input_size; i++) {
-		int a = vm_read(vm, i);
+	for (int i = 0; i < input_size; i+=4) {
+		int a = vm_read(vm, i+threadIdx.x);
 		//printf("a is: %c", a);
-		results[offset + i] = a;
+		results[offset + i + threadIdx.x] = a;
+		__syncthreads();
 	}
 }
 

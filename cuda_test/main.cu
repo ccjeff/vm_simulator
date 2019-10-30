@@ -19,6 +19,7 @@
 #define STORAGE_SIZE (1 << 17)
 
 #define NUM_THREADS (1<<2)
+// newly created 4 threads for parallel execution of the program
 
 /*managed: memory space specifier*/
 
@@ -96,12 +97,21 @@ int main() {
 	cudaSetDevice(0);
 	// input file's memory size
 	int input_size = load_binaryFile(DATAFILE, input, STORAGE_SIZE);
-	
+	cudaEvent_t start, stop;
+	cudaEventCreate(&start);
+	cudaEventCreate(&stop);
+	cudaEventRecord(start,0);
+	float elapsed_time;
 	/* Launch kernel function in GPU, with single thread
 	and dynamically allocate INVERT_PAGE_TABLE_SIZE bytes of share memory,
 	which is used for variables declared as "extern __shared__" */
-	mykernel<<<1, 1, INVERT_PAGE_TABLE_SIZE>>>(input_size);
-
+	mykernel<<<1, NUM_THREADS, INVERT_PAGE_TABLE_SIZE>>>(input_size);
+	cudaEventRecord(stop, 0);
+	cudaEventSynchronize(stop);
+	cudaEventElapsedTime(&elapsed_time, start, stop);
+	cudaEventDestroy(start);
+	cudaEventDestroy(stop);
+	// Parallel execution in 4 threads
 	cudaStatus = cudaGetLastError();
 	if (cudaStatus != cudaSuccess) {
 		fprintf(stderr, "mykernel launch failed: %s\n",
@@ -115,7 +125,7 @@ int main() {
 	cudaDeviceReset();
 	
 	write_binaryFile(OUTFILE, results, input_size);
-
+	printf("GPU elapse time is: %f seconds\n", elapsed_time/1000.0);
 	printf("pagefault number is %d\n", pagefault_num);
 
 	return 0;

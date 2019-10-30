@@ -32,4 +32,5 @@ __device__ void vm_write(VirtualMemory *vm, u32 addr, uchar value);
 __device__ void vm_snapshot(VirtualMemory *vm, uchar *results, int offset,
                             int input_size);
 
+
 #endif
